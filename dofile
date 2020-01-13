@@ -1,0 +1,255 @@
+*Aufbereitung von Eingabefehlern*
+
+recode SB01_09 6=5 if lfdnr==328 // geprüft anhand der Fragebögen
+recode AV3_Datenweitergabe 8=7 if lfdnr==403 // geprüft anhand der Fragebögen
+recode PF02_04 9=. if lfdnr==119 // vermutet, relativ sicher
+recode PF02_05 9=. if lfdnr==119 // vermutet, relativ sicher
+
+
+*===============================================================================================
+*
+*Datenanaylse zur Diplomarbeit "Privatsphäre und Privatheit im digitalen Zeitalter"
+*
+*           Benutzter Datensatz: vignettenbefragungWIDE.dta
+*
+*						Eingereicht am 6.1.2020
+*
+*
+*								Inhalt
+*							0...generelle Commands
+*							1...Definieren von Missing Values 
+*							2...Berechnen der lateten Konstrukte							
+*							3...Deskriptive Auswertung
+*							4...Umformung Wide zu Long Fomat
+*							5...Auswertung der Vignetten
+*							6...Spezielle Ausertung zu den Hypothesen
+*
+*
+*
+*
+*===============================================================================================
+
+*** 0 Genrelle Commands ***
+
+*** 0.1. verschiedenes ***
+
+version 13 //Versionsnummer muss angegeben werden, damit das do file auch in anderen Stata Versionen funktioniert
+set more off, permanently //Ausgabe läuft mit einem mal durch 
+*log using master.log, replace // erzeugt ein Loh File 
+
+*** 0.2. installieren von benötigten Stata Porgrammen ***
+
+ssc install coefplot //benötigt zur Darstellung von Coefplots
+
+
+*** 1 Definieren von Missing Values ***
+
+mvdecode _all, mv (-9) //definiert allen Variablen mit Wert "-9" als missing 
+
+*** 1.1. Recodieren ***
+
+recode Privatunternehmen 1=0 0=1, gen(Studentenwerk) //Umpolen der Privatunternehmen-Variable um Interpretation zu erleichtern (alle Effekte zeigen in die gleiche Richtung im Modell) 
+label define Studentenwerk 1 "Studentenwerk" 0 "Privatunternehmen", replace
+label values Studentenwerk Studentenwerk
+
+*** 1.2. Macros für Graph Options etc. ***
+
+global histogramoptions scheme(s2mono) percent discrete graphregion(color(white)) //festlegen immer wieder genutzter Histogram Optionen, welche dann durch das Makro aufgerufen werden
+
+***1.3. umformatieren ***
+
+format %1.0f AV1_nutzen AV2_Vertrauen AV3_Datenweitergabe //korrekte Datstellung in Histogram etc..
+
+*** 2 Berechnen der Konstrukte ***
+
+* Vertrauen *
+ 
+gen flipPF02_01 = 7- PF02_01
+gen Vertrauen_SI = (PF01_02+flipPF02_01)/2
+
+* Risiko * 
+
+alpha PF01_01 PF02_02 PF02_03 PF02_04 PF02_05, item
+gen Risikobereitschaft_SI = (PF01_01+PF02_02+PF02_03+PF02_04+PF02_05)/5
+
+* Privatsphärebewusstsein * 
+
+alpha SB01_01 SB01_02 SB01_03 SB01_04 SB01_05 SB01_06 SB01_07  SB01_08 SB01_09, item //Die Analyse mit Cronbachs Alpha ergbt eine Verschlechterung der Skala durch Item 8, deshalb würd es für den Summenindex nicht genutzt 
+egen anzahl_missing = rowmiss (SB01_01 SB01_02 SB01_03 SB01_04 SB01_05 SB01_06 SB01_07 SB01_09) // Es gibt 16 Fälle wo jeweils nur eine Variable missing ist, und 2 Fälle wo 7 oder 8 missing sind. Diese werden ausgeschlossen, die Fälle mit 1 missing werden inkludiert 
+egen Sicherheitsbewusstsein_summiert = rowmean (SB01_01 SB01_02 SB01_03 SB01_04 SB01_05 SB01_06 SB01_07 SB01_09) if anzahl_missing <=1 // Gesamtskala
+egen zSicherheitsbewusstsein_summiert = std(Sicherheitsbewusstsein_summiert) //z-Standartisierte Variable 
+
+* Westins Kategories ganz grob *
+
+recode Sicherheitsbewusstsein_summiert (1/3=1) (3.1/4.3=2) (4.3/5.1=3), gen(Westin)
+
+* Summenindex aus den genutzen Diensten *
+
+egen mind1jaoder1nein = anymatch(AmazonPrime Dropbox Facebook Instagram Netflix PayPal Signal Spotify Telegram Tinder Twitter Whatsapp), values(1 2) // Fälle die gar nichts angegeben haben sollen nicht berücksichtigt werden, also auch nicht als "keine Apps genutzt"
+recode AmazonPrime Dropbox Facebook Instagram Netflix PayPal Signal Spotify Telegram Tinder Twitter Whatsapp (2=0) (.b=0) (-9=0) //recodieren von 2 zu 0 als Nicht-Nutzung + Imputation: Nicht angekreuzt wird als Nein gewertet
+egen Dienste_alle = rowtotal(AmazonPrime Dropbox Facebook Instagram Netflix PayPal Signal Spotify Telegram Tinder Twitter Whatsapp) if mind1jaoder1nein ==1 // nur wenn es mindestens eine Angabe gab
+egen Dienste_alle_ohneM = rowtotal (AmazonPrime Dropbox Facebook Instagram Netflix PayPal Spotify Tinder Twitter) if mind1jaoder1nein ==1 // nur wenn es mindestens eine Angabe gab
+egen zDienste_alle = std(Dienste_alle) //z-Standartisierte Variable 
+
+*** 3 Deskriptive Auswertung ***
+
+* 3.1. Vignetten *
+
+qui summarize AV1_nutzen
+local m=r(mean)
+hist AV1_nutzen,  ${histogramoptions} name(AV1, replace) xtitle (Nutzen der App) text(-4 4 "Durchschnitt = `=string(`=r(mean)',"%8.2f")'") ytitle(Prozent)
+qui summarize AV2_Vertrauen
+local m=r(mean)
+hist AV2_Vertrauen, ${histogramoptions} name(AV2, replace) xtitle (Vertrauen in die App) nodraw text(-4 4 "Durchschnitt = `=string(`=r(mean)',"%8.2f")'") ytitle(Prozent)
+qui summarize AV3_Datenweitergabe
+local m=r(mean)
+hist AV3_Datenweitergabe , ${histogramoptions} name(AV3, replace) xtitle (Vermutete Datenweitergabe) nodraw text(-4 4 "Durchschnitt = `=string(`=r(mean)',"%8.2f")'") ytitle(Prozent)
+
+graph combine AV1 AV2 AV3, rows(1)  xsize(10) iscale (1.2) graphregion(color(white))
+graph export AuspraegungenAV.wmf, replace
+
+*3.2. Sicherheitsbewusstsein und genutzte Dienste* 
+
+graph bar (mean) AmazonPrime Dropbox Facebook Instagram Netflix PayPal Signal Spotify Telegram Tinder Twitter Whatsapp, showyvars yvaroptions(label(angle(forty_five)))  legend(off) scheme(s2mono) //Barchart für die Dienste, muss noch verbessert werden
+hist Sicherheitsbewusstsein_summiert,discrete  ${histogramoptions} name(SBW, replace)   xtitle(Privatsphärebewusstsein) 
+hist Dienste_alle, ${histogramoptions} name(Dienstealle, replace)   xtitle (absoluter Summenindex Sicherheitsbewusstsein) 
+
+*** 4 Umformung von Wide zu Long *** 
+
+*reshape long VIGFORMULIERUNG, i(lfdnr) j(Vignette) 
+
+*** 5...Auswertung der Vignetten, Mehrbenenmodell*** 
+
+// es müssen jeweils die entsprechenden Makros geladen werden, und dann muss der code ab Zeile 191 abgespielt werden
+
+*Specs für Modell 1 (Tabelle 6) // Nullmodell
+
+global SBW 
+global UVs 
+global L1 ||lfdnr:, variance
+
+xtmixed AV1_nutzen ${UVs} ${SBW} ${L1}
+eststo m1
+estat icc 
+xtmixed AV2_Vertrauen ${UVs} ${SBW} ${L1}
+eststo m2
+estat icc 
+xtmixed AV3_Datenweitergabe ${UVs} ${SBW} ${L1}
+estat icc 
+eststo m3
+esttab m1 m2 m3 using Tabelle6.rtf, nobaselevels se replace 
+
+*Specs für Modell 2 (Tabelle 7)
+
+global SBW 
+global UVs i.Studentenwerk i.Pruefungsamt i.App_viel_genutzt
+global L1 ||lfdnr:, variance
+
+xtmixed AV1_nutzen ${UVs} ${SBW} ${L1}
+eststo m1
+estat icc 
+xtmixed AV2_Vertrauen ${UVs} ${SBW} ${L1}
+eststo m2
+estat icc 
+xtmixed AV3_Datenweitergabe ${UVs} ${SBW} ${L1}
+estat icc 
+eststo m3
+esttab m1 m2 m3 using Tabelle7.rtf, nobaselevels se replace 
+
+*Specs für Modell 3 (Tabelle 8)
+
+global SBW 
+global UVs  i.Studentenwerk i.Pruefungsamt i.App_viel_genutzt i.Studentenwerk#i.Pruefungsamt i.Studentenwerk#i.App_viel_genutzt i.Pruefungsamt#i.App_viel_genutzt 
+global L1 ||lfdnr:, variance
+
+xtmixed AV1_nutzen ${UVs} ${SBW} ${L1}
+eststo m1
+estat icc 
+xtmixed AV2_Vertrauen ${UVs} ${SBW} ${L1}
+eststo m2
+estat icc 
+xtmixed AV3_Datenweitergabe ${UVs} ${SBW} ${L1}
+estat icc 
+eststo m3
+esttab m1 m2 m3 using Tabelle8.rtf, nobaselevels se replace 
+
+*Specs für Modell 4 (Tabelle 9), Ausgabe inklusive Coefplots für singifikante Werte
+
+global SBW Sicherheitsbewusstsein_summiert Dienste_alle i.SD05 i.SD20 Vertrauen_SI Risikobereitschaft_SI SD06_01 i.SD23 
+global UVs  i.Studentenwerk i.Pruefungsamt i.App_viel_genutzt i.Studentenwerk#i.Pruefungsamt i.Studentenwerk#i.App_viel_genutzt i.Pruefungsamt#i.App_viel_genutzt 
+global L1 ||lfdnr:, variance
+
+xtmixed AV1_nutzen ${UVs} ${SBW} ${L1}
+eststo m1
+estat icc 
+coefplot,  xline(0) nolabel  keep (1.Studentenwerk 1.Pruefungsamt 1.App_viel_genutzt 1.Studentenwerk#1.App_viel_genutzt Sicherheitsbewusstsein_summiert Dienste_alle_ohneMARC) scheme (s2mono) name (COEF1, replace)
+xtmixed AV2_Vertrauen ${UVs} ${SBW} ${L1}
+eststo m2
+estat icc 
+coefplot,  xline(0) nolabel  keep (1.Studentenwerk 1.App_viel_genutzt 1.Studentenwerk#1.App_viel_genutzt Sicherheitsbewusstsein_summiert Dienste_alle_ohneMARC Vertrauen_SI) scheme (s2mono) name (COEF2, replace)
+xtmixed AV3_Datenweitergabe ${UVs} ${SBW} ${L1}
+estat icc 
+eststo m3
+coefplot,  xline(0) nolabel  keep (1.Studentenwerk 1.App_viel_genutzt  Sicherheitsbewusstsein_summiert 1.Studentenwerk#1.Pruefungsamt Vertrauen_SI) scheme (s2mono) name (COEF3, replace)
+esttab m1 m2 m3 using Tabelle9.rtf, nobaselevels se replace 
+
+
+*** 6 Spezielle Ausertung zu den Hypothese 6 ***
+
+*Specs für Modell 6 (Prüfen von Interaktionseffekten)
+
+*#1 für Dimension "Anbieter"
+global SBW Dienste_alle Sicherheitsbewusstsein_summiert c.Sicherheitsbewusstsein_summiert#i.Studentenwerk i.SD05 i.SD20 i.MODUS 
+*#2 für Dimension "Art der Daten"
+global SBW Dienste_alle Sicherheitsbewusstsein_summiert c.Sicherheitsbewusstsein_summiert#i.Pruefungsamt i.SD05 i.SD20 i.MODUS 
+*#3 für Dimension "Häufigkeit der Nutzung"
+global SBW Dienste_alle Sicherheitsbewusstsein_summiert c.Sicherheitsbewusstsein_summiert#i.App_viel_genutzt i.SD05 i.SD20 i.MODUS 
+
+
+* Marginsplots um Interaktionseffekte für die einzelnen Dimensionen zu prüfen * 
+
+global marg qui margins i.Studentenwerk, at (Sicherheitsbewusstsein_summiert =(1(1)5))
+global marg qui margins i.Pruefungsamt, at (Sicherheitsbewusstsein_summiert =(1(1)5))
+global marg qui margins i.App_viel_genutzt , at (Sicherheitsbewusstsein_summiert =(1(1)5))
+
+
+
+*AV2* - Würdest du die App nutzen? 
+xtmixed AV1_nutzen ${UVs} ${SBW} ${L1}
+eststo m1
+estat icc 
+${marg}
+marginsplot, name(erster, replace) title (erster) xtitle (Sicherheitsbewusstsein) legend(rows(4) size(tiny))
+
+*AV2* - Wie Vertrauenswürdig findest du das Abgebot? 
+xtmixed AV2_Vertrauen ${UVs} ${SBW} ${L1}
+eststo m2
+estat icc 
+${marg}
+marginsplot,  name(zweiter, replace) title (zweiter)  xtitle (Sicherheitsbewusstsein) legend(rows(4) size(tiny))
+
+*AV3* - Für wie wahrscheinlich hälst du die Datenweitergabe?
+xtmixed AV3_Datenweitergabe ${UVs} ${SBW} ${L1}
+estat icc 
+eststo m3
+${marg}
+marginsplot, name(dritter, replace) title (dritter)  xtitle (Sicherheitsbewusstsein)  legend(rows(4) size(tiny)) 
+
+*=* AUSGABE *=*
+esttab m1 m2 m3 using Interaktionseffekze.rtf, nobaselevels se replace 
+
+
+** ZUSATZ: Überprüfen unterschiedlicher Residuen im Mehrebenmodell mit Westins Kategorien **
+
+global SBW i.Westin i.SD05 i.SD20 i.MODUS  i.Westin#i.App_viel_genutzt
+global UVs  i.Studentenwerk i.Pruefungsamt i.App_viel_genutzt i.Studentenwerk#i.Pruefungsamt i.Studentenwerk#i.App_viel_genutzt i.Pruefungsamt#i.App_viel_genutzt 
+global L1 ||lfdnr:,  residuals(independent, by(Westin))
+
+
+
+*** Ende des Do Files *** 
+
+log close 
+exit 
+
+
